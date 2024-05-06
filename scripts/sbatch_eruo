@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#SBATCH --time=0:20:00
+#SBATCH --mail-type=END
+#SBATCH --mail-user=rjackson@anl.gov
+#SBATCH --nodes=1
+
+cd /lcrc/group/earthscience/rjackson/wfip3/scripts
+mamba activate wfip3_env
+printf -v j "%02d" $SLURM_ARRAY_TASK_ID
+python process_vad.py 202405$SLURM_ARRAY_TASK_ID
+
