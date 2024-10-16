@@ -6,9 +6,11 @@ import radtraq
 import glob
 
 from scipy.signal import convolve2d
+from statsmodels.tsa.stattools import acf
 path = '/lcrc/group/earthscience/rjackson/wfip3/caco/pdfs/'
 in_path = '/lcrc/group/earthscience/rjackson/wfip3/caco/lidar_ingested/'
-window_size = (3, 3)
+
+def get_noise_variance(
 def output_vel_product(lidar_file):
     base, name = os.path.split(lidar_file)
     ds = xr.open_dataset(lidar_file)

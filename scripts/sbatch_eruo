@@ -1,11 +1,10 @@
 #!/bin/bash -l
-#SBATCH --time=0:20:00
-#SBATCH --mail-type=END
-#SBATCH --mail-user=rjackson@anl.gov
-#SBATCH --nodes=1
+#PBS -l walltime=0:20:00
+#PBS -A rainfall
+#PBS -J 7-30
 
 cd /lcrc/group/earthscience/rjackson/wfip3/scripts
 mamba activate wfip3_env
-printf -v j "%02d" $SLURM_ARRAY_TASK_ID
-python process_vad.py 202405$SLURM_ARRAY_TASK_ID
+printf -v j "%02d" ${PBS_ARRAY_INDEX}
+python process_vad.py 202405${PBS_ARRAY_INDEX}
 

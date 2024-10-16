@@ -15,6 +15,7 @@ import xarray as xr
 import pandas as pd
 import matplotlib.dates as mdates
 import glob
+import sys
 
 """
 Import of StreamLine .hpl (txt) files and save locally in directory. Therefore
@@ -108,7 +109,7 @@ additional information about institution and contact are optional;
 """
 
 
-def hpl_to_netcdf(file_path, path_out, institution=None, contact=None, overwrite=False,
+def hpl_to_netcdf(file_path, path_out, institution=None, contact=None, overwrite=True,
                   correction_factor=0.025):
     # check if import file exists
     if not os.path.exists(file_path):
@@ -358,8 +359,14 @@ def to_netcdf_l1(file_path, file_name_out, lidar_info, path_out):
     return ds_temp
 
 if __name__ == '__main__':
-    file_list = glob.glob(input_path + '/*.hpl')
+    if len(sys.argv) == 1:
+        date_str = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y%m%d')
+    else:
+        date_str = sys.argv[1]
+    file_list = glob.glob(input_path + '/*%s*.hpl' % date_str)
     for f in file_list:
        print(f)
-       hpl_to_netcdf(f, f[:-4] + '.nc')
- 
+       try:
+           hpl_to_netcdf(f, f[:-4] + '.nc')
+       except:
+           print("Error processing %s" % f)

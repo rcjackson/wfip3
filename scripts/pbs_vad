@@ -1,0 +1,12 @@
+#!/bin/bash -l
+#PBS -l walltime=2:00:00
+#PBS -A rainfall
+#PBS -r y
+source /home/rjackson/.bashrc
+cd /lcrc/group/earthscience/rjackson/wfip3/scripts
+mamba activate wfip3_env
+YESTERDAY=20240$PBS_ARRAY_INDEX
+python download_data.py $YESTERDAY
+python dl-ingest.py --date=$YESTERDAY
+python process_vad.py $YESTERDAY
+
