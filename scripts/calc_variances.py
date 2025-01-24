@@ -6,10 +6,10 @@ import os
 from glob import glob
 from statsmodels.tsa.stattools import acf
 
-input_path = '/lcrc/group/earthscience/rjackson/dl-sparc-canyons/netcdf/'
-output_path = '/lcrc/group/earthscience/rjackson/dl-sparc-canyons/w_variances/'
+input_path = '/lcrc/group/earthscience/rjackson/wfip3/caco/lidar_ingested/'
+output_path = '/lcrc/group/earthscience/rjackson/wfip3/caco/w_variances/'
 
-file_list = input_path + '/%s/*Stare*.nc' % sys.argv[1]
+file_list = input_path + '/%s/*fpt.nc' % sys.argv[1]
 print(file_list)
 stares = sorted(glob(file_list))
 print(stares)
@@ -22,7 +22,7 @@ def get_variances(input_ds):
     inp_ds = input_ds.reindex(time=dt_range, method='nearest', tolerance=np.timedelta64(1, 's'))
     
     time_10min = inp_ds["time"].resample(time="10min").min().values
-    noise_variance = np.zeros((time_10min.shape[0], len(inp_ds['range'])))
+    noise_variance = np.zeros((time_10min.shape[0], len(inp_ds['range_gate'])))
     atmos_variance = np.zeros_like(noise_variance)
     w_25 = np.zeros_like(noise_variance)
     w_50 = np.zeros_like(noise_variance)
@@ -31,8 +31,8 @@ def get_variances(input_ds):
     w_max = np.zeros_like(w_min)
     variance = np.zeros_like(noise_variance)
     for i, j in enumerate(range(0, nperiods, 1200)):
-        for k in range(0, len(inp_ds['range'])):
-            series = inp_ds['radial_velocity'].values[j:min([j+3600, nperiods]), k]
+        for k in range(0, len(inp_ds['range_gate'])):
+            series = inp_ds['radial_wind_speed'].values[j:min([j+3600, nperiods]), k]
             series_intensity = inp_ds['intensity'].values[j:min([j+3600, nperiods])]
             series = series[np.isfinite(series)]
             if len(series) == 0:
@@ -83,7 +83,7 @@ def get_variances(input_ds):
     w_max.attrs["units"] = "m s-1"
     
     variance_ds = xr.Dataset({'time': time_10min,
-                              'range': inp_ds["range"],
+                              'range': inp_ds["range_gate"],
                               'variance': variance,
                               'noise_variance': noise_variance,
                               'atmos_variance': atmos_variance,
@@ -96,4 +96,4 @@ def get_variances(input_ds):
 if __name__ == "__main__":
     ds_list = xr.concat([xr.open_dataset(x).sortby('time') for x in stares], dim='time').sortby('time')
     variance_ds = get_variances(ds_list)
-    variance_ds.to_netcdf(output_path + 'crocus.wstats.%s.nc' % sys.argv[1])
+    variance_ds.to_netcdf(output_path + 'caco.wstats.%s.nc' % sys.argv[1])

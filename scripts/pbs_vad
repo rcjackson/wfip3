@@ -5,8 +5,9 @@
 source /home/rjackson/.bashrc
 cd /lcrc/group/earthscience/rjackson/wfip3/scripts
 mamba activate wfip3_env
-YESTERDAY=20240$PBS_ARRAY_INDEX
-python download_data.py $YESTERDAY
-python dl-ingest.py --date=$YESTERDAY
+printf -v j "%04d" $PBS_ARRAY_INDEX
+YESTERDAY=2024$j
+#python download_data.py $YESTERDAY
+#python dl-ingest.py --date=$YESTERDAY
 python process_vad.py $YESTERDAY
 

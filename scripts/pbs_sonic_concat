@@ -1,9 +1,11 @@
 #!/bin/bash -l
-#PBS -l walltime=0:05:00
+#PBS -l walltime=0:20:00
 #PBS -A rainfall
 #PBS -r y
 source /home/rjackson/.bashrc
 cd /lcrc/group/earthscience/rjackson/wfip3/scripts
 mamba activate wfip3_env
-YESTERDAY=20240$PBS_ARRAY_INDEX
-python concatenate_sonic_files.py z01 $YESTERDAY
+printf -v j "%03d" $PBS_ARRAY_INDEX
+YESTERDAY=20241$j
+python download_data.py $YESTERDAY
+python concatenate_sonic_files.py z02 $YESTERDAY

@@ -6,11 +6,8 @@ from scipy.signal import convolve2d
 def output_vel_product(lidar_file):
     base, name = os.path.split(lidar_file)
     ds = xr.open_dataset(lidar_file)
-    if not ds.attrs["scan_type"] == "fpt":
-        ds.close()
-        return
-    ds['radial_velocity'] = ds['radial_velocity'].where(ds['intensity'] > 1.008, drop=False)
-    vel_variance = ds['radial_velocity'].resample(time='30m').std(dim='time') 
+    ds['radial_wind_velocity'] = ds['radial_wind_velocity'].where(ds['intensity'] > 1.008, drop=False)
+    vel_variance = ds['radial_wind_velocity'].resample(time='30m').std(dim='time') 
     
     variance_bins = np.linspace(0, 2, 60)
     vel_bins = np.linspace(-10, 10, 60)
@@ -20,7 +17,7 @@ def output_vel_product(lidar_file):
         hist_vel_variance[i, :], bins = np.histogram(
             vel_variance.values[:, i], variance_bins)
         hist_vel[i, :], bins = np.histogram(
-            ds["radial_velocity"].values[:, i], vel_bins)
+            ds["radial_wind_velocity"].values[:, i], vel_bins)
 
     hist_vel_variance = xr.DataArray(hist_vel_variance, dims=('range', 'bin_vel_variance'))
     hist_vel_variance.attrs["long_name"] = "Histogram of velocity variance"

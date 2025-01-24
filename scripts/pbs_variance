@@ -5,6 +5,6 @@
 source /home/rjackson/.bashrc
 cd /lcrc/group/earthscience/rjackson/wfip3/scripts
 mamba activate wfip3_env
-printf -v j "%02d" $PBS_ARRAY_INDEX
-YESTERDAY=202306$j
+printf -v j "%03d" $PBS_ARRAY_INDEX
+YESTERDAY=20241$j
 python calc_variances.py $YESTERDAY
