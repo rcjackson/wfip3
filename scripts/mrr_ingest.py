@@ -4,7 +4,7 @@ import glob
 
 input_path = '/lcrc/group/earthscience/rjackson/wfip3/barg/mrr/'
 
-file_list = glob.glob(input_path + '*.pro')
+file_list = glob.glob(input_path + '*202409*.pro')
 
 for fi in file_list:
     ds = xr.open_dataset(fi, engine='metek')

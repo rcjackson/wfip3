@@ -13,11 +13,11 @@ elif len(sys.argv) == 3:
     start_date = '%s000000' % sys.argv[1]
     end_date = '%s000000' % sys.argv[2]
 
-dest = '/lcrc/group/earthscience/rjackson/wfip3/caco/sonic/'
+dest = '/lcrc/group/earthscience/rjackson/wfip3/barg/mrr/'
 a2e = DAP('a2e.energy.gov', confirm_downloads=False)
 a2e.setup_basic_auth('rjackson@anl.gov', 'Kur@do43c')
 filt = {
-    'Dataset': 'wfip3/caco.sonic.z02.b1',
+    'Dataset': 'wfip3/barg.mrr.z01.a0',
     'date_time': {
         'between': [start_date, end_date]
     },
