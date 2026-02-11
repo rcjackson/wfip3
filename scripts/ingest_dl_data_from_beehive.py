@@ -6,16 +6,47 @@ import sage_data_client
 import requests
 import sys
 import os
+import matplotlib.pyplot as plt
+import cmweather
 
 from datetime import datetime, timedelta
 
+def plot_rhi(dataset, vel_key="radial_wind_speed", rng_key="distance"):
+    fig = plt.figure(figsize=(6, 4))
+    ax = plt.axes()
+    #dataset = dataset.where(dataset['intensity'] > 1.01)
+    az_deg = dataset['azimuth'].values
+    azi = np.deg2rad(dataset['azimuth'])
+    el = np.deg2rad(dataset['elevation'])
+    
+    rng = dataset[rng_key]
+    el, rng = np.meshgrid(el, rng, indexing='ij')
+    x = rng * np.cos(el)
+    y = rng * np.sin(el)
+    c = ax.pcolormesh(x/1e3, y, dataset[vel_key].where(
+        dataset['intensity'] > 1.008), cmap='balance', vmin=-20, vmax=20)
+    ax.contourf(x/1e3, y, dataset['intensity'], levels=[1.3, np.inf])
+    plt.colorbar(c, ax=ax, 
+                 label='Radial velocity [m/s]', location='bottom')
+    ax.set_ylim([0, 500])
+    ax.set_xlim([-2, 2])
+    #ax.set_rlim([0, 2.0])
+    #ax.set_rticks([0, 0.25, .500, 0.75, 1.000, ])
+    #ax.set_thetalim([np.deg2rad(5), np.deg2rad(15)])
+    #ax.set_theta_zero_location("E") 
+    ax.set_ylabel('Z [m]', labelpad=40)
+    ax.set_xlabel('X [km]')
+    ax.set_title(str(dataset['time'].values[0]) + f' {az_deg[0]:.1f} degrees')
+    #ax.yaxis.set_label_position("right")
+    #ax.yaxis.tick_right()
+    return fig
 
 def convert_to_hours_minutes_seconds(decimal_hour, initial_time):
     delta = timedelta(hours=decimal_hour)
     return datetime(initial_time.year, initial_time.month, initial_time.day) + delta
 
 def read_as_netcdf(file, lat, lon, alt, transition_threshold_azi=0.01,
-                  transition_threshold_el=0.005, round_azi=1, round_el=1):
+                  transition_threshold_el=0.1, round_azi=1, round_el=1):
     field_dict = utils.hpl2dict(file)
     initial_time = pd.to_datetime(field_dict['start_time'])
 
@@ -87,24 +118,7 @@ def read_as_netcdf(file, lat, lon, alt, transition_threshold_azi=0.01,
     num_rays = ds.dims['time']
     diff_elevation = ds["elevation"].diff(dim='time').values
     transitions = np.pad(np.abs(diff_elevation) > transition_threshold_el, (1, 0))
-    
-    start_indicies = []
-    end_indicies = []
-    last_ind = 0
-    for i, t in enumerate(unique_elevations):
-        where_in_sweep = np.argwhere(ds['elevation'].values == t)
-        start_indicies.append(int(where_in_sweep.min()))
-        end_indicies.append(int(where_in_sweep.max()))
-    end_indicies = np.array(end_indicies)
-    
-    ds["sweep_start_ray_index"] = ('sweep', start_indicies)
-    ds["sweep_start_ray_index"].attrs["long_name"] = "index_of_first_ray_in_sweep"
-    ds["sweep_start_ray_index"].attrs["units"] = ""
-    ds["sweep_start_ray_index"].attrs["_FillValue"] = -99.
-    ds["sweep_end_ray_index"] = ('sweep', end_indicies)
-    ds["sweep_end_ray_index"].attrs["long_name"] = "index_of_last_ray_in_sweep"
-    ds["sweep_end_ray_index"].attrs["units"] = ""
-    ds["sweep_end_ray_index"].attrs["_FillValue"] = -99.
+     
     ds["antenna_transition"] = ('time', transitions)
     ds["antenna_transition"].attrs["long_name"] = "antenna_transition"
     ds["antenna_transition"].attrs["units"] = "1 = transition, 0 = not"
@@ -123,14 +137,34 @@ def main(node, start_date, end_date):
             end=end_day,
             filter={
                 "name" : 'upload',
-                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.6.11",
+                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.7.23",
                 "vsn" : node,
             }
         )
     print(df_files.head())
     print(df_files["value"][0])
+    df_strategy = sage_data_client.query(
+            start=start_day,
+            end=end_day,
+            filter={
+                "name" : 'lidar.strategy',
+                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.7.23",
+                "vsn" : node,
+            }
+        )
+    strategies = df_strategy["value"]
+    print(strategies)
+    strategy_time = df_strategy["timestamp"]
+    for i, file_name in enumerate(df_files["value"]):
+        time_diff = strategy_time - df_files["timestamp"][i]      
+        ind_where = np.argmin(np.abs(time_diff)).squeeze()
+        print(time_diff[ind_where])
 
-    for file_name in df_files["value"]:
+        if time_diff[ind_where].total_seconds() > 300:
+            continue
+        if strategies[ind_where] == 0:
+            print(f"Skipping {file_name}")
+            continue
         base, name = os.path.split(file_name)
         output_name = name.split("-")[1]
         if os.path.exists(os.path.join(output_dir, output_name)):
@@ -143,15 +177,28 @@ def main(node, start_date, end_date):
                 file.write(response.content)
             print(f"{output_name} Downloaded!")
             try:
-                my_nc = read_as_netcdf(os.path.join(output_dir, output_name), lat=41.2807, lon=70.1658, alt=0)
+                my_nc = read_as_netcdf(os.path.join(output_dir, output_name),
+                                       lat=41.2807, lon=70.1658, alt=0)
                 my_nc.to_netcdf(os.path.join(output_dir, output_name[:-4] + '.nc'))
                 print(f"{output_name} Processed!")
+                fig = plot_rhi(my_nc, vel_key="radial_velocity", rng_key="range")
+                fig.savefig(os.path.join(os.path.join(output_dir, 'png'),
+                    output_name + '.png'), bbox_inches='tight')         
             except (ValueError, TypeError) as e:
                 print(f"Processing {output_name} failed: {e}")
 
 username = 'rjackson'         
 password = '49GOS28FFE6I8REWMMD6'
-output_dir = '/Users/rjackson/wfip3/data/IOP_June2025_test_WREF'
+node = sys.argv[1]
+if node == "W0BE":
+   out_data = "nant.lidar.z02.a1"
+elif node == "W0C3":
+   out_data = "bloc.lidar.z02.a1"
+elif node == "W0C0":
+   out_data = "ttp.lidar.z02.a1"
+output_dir = f'/Volumes/Untitled/wfip3_adaptive_scanning_data/{out_data}/'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 if __name__ == "__main__":
     node = sys.argv[1]
     start_date = sys.argv[2]

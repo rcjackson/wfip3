@@ -13,14 +13,95 @@ from glob import glob
 from datetime import datetime, timedelta
 from distributed import LocalCluster, Client, wait
 
-DEFAULT_SOURCE_PATH = '/lcrc/group/earthscience/rjackson/wfip3/caco/lidar/'
-DEFAULT_OUTPUT_PATH = '/lcrc/group/earthscience/rjackson/wfip3/caco/lidar_ingested/'
-DEFAULT_QUICKLOOKS_PATH = '/lcrc/group/earthscience/rjackson/wfip3/caco/quicklooks'
+DEFAULT_SOURCE_PATH = '/Volumes/Untitled/wfip3_adaptive_scanning_data/nant.lidar.z02.a1/'
+DEFAULT_OUTPUT_PATH = '/Volumes/Untitled/wfip3_adaptive_scanning_data/nant.lidar.z02.a1/netcdf'
+DEFAULT_QUICKLOOKS_PATH = '/Volumes/Untitled/wfip3_adaptive_scanning_data/nant.lidar.z02.a1/quicklooks'
 
 neiu_lat = 42 + 1/60 + 56.86/3600
 neiu_lon = -70 - 3/60 - 12.37/3600
 neiu_alt = 51.4
-radial_vel_cal = 0.025
+radial_vel_cal = 0.0
+azimuth_cal = 0.0
+
+def plot_time_series(ds, **kwargs):
+    fig, ax = plt.subplots(3, 1, figsize=(10, 7))
+    cbar_kwargs = {'label': '1 - log10(intensity)'}
+    (1 - np.log10(ds['intensity'])).T.plot(ax=ax[0], cmap='ChaseSpectral', vmin=0, vmax=1,
+        cbar_kwargs=cbar_kwargs)
+    ds['radial_velocity'].T.plot(ax=ax[1], cmap='balance', vmin=-5, vmax=5)
+    ds['spectral_width'].T.plot(ax=ax[2], cmap='Spectral_r', vmin=5, vmax=10)
+    ax[0].set_ylim([0, 3000])
+    ax[1].set_ylim([0, 3000])
+    ax[2].set_ylim([0, 3000])
+    fig.tight_layout()
+    return fig 
+    
+
+def plot_rhi(dataset, vel_key="radial_wind_speed", rng_key="distance", **kwargs):
+    if not "cmap" in kwargs:
+        kwargs["cmap"] = "balance"
+    if not "vmin" in kwargs:
+        kwargs["vmin"] = -5
+    if not "vmax" in kwargs:
+        kwargs["vmax"] = 5
+    fig = plt.figure(figsize=(6, 4))
+    ax = plt.axes()
+    #dataset = dataset.where(dataset['intensity'] > 1.01)
+    az_deg = dataset['azimuth'].values
+    azi = np.deg2rad(dataset['azimuth'])
+    el = np.deg2rad(dataset['elevation'])
+    
+    rng = dataset[rng_key]
+    el, rng = np.meshgrid(el, rng, indexing='ij')
+    x = rng * np.cos(el)
+    y = rng * np.sin(el)
+    c = ax.pcolormesh(x/1e3, y, dataset[vel_key].where(
+        dataset['intensity'] > 1.008), **kwargs)
+    ax.contourf(x/1e3, y, dataset['intensity'], levels=[1.3, np.inf])
+    plt.colorbar(c, ax=ax, 
+                 label='Radial velocity [m/s]', location='bottom')
+    ax.set_ylim([0, 500])
+    ax.set_xlim([-2, 2])
+    ax.set_ylabel('Z [m]', labelpad=40)
+    ax.set_xlabel('X [km]')
+    ax.set_title(str(dataset['time'].values[0]) + f' {az_deg[0]:.1f} degrees')
+    
+    return fig
+
+def plot_ppi(dataset, vel_key="radial_wind_speed", rng_key="distance", **kwargs):
+    if not "cmap" in kwargs:
+        kwargs["cmap"] = "balance"
+    if not "vmin" in kwargs:
+        kwargs["vmin"] = -5
+    if not "vmax" in kwargs:
+        kwargs["vmax"] = 5
+    fig, ax = plt.subplots(1, 3, figsize=(18, 6))
+    #dataset = dataset.where(dataset['intensity'] > 1.008)
+    
+    azi = np.deg2rad(dataset['azimuth'])
+    # Handle wrap around smoothly
+    el = np.deg2rad(dataset['elevation'])
+    rng = dataset[rng_key]
+    azi, rng = np.meshgrid(azi.values, rng.values, indexing='ij')
+    x = rng * np.sin(azi)
+    y = rng * np.cos(azi)
+    for i, elevations in enumerate([5, 10, 15]):
+        mask = np.logical_and(dataset['intensity'] > 1.008,
+                              dataset['elevation'] == elevations)
+        
+        c = ax[i].pcolormesh(x/1e3, y/1e3, dataset[vel_key].where(
+            mask), **kwargs)
+        
+        plt.colorbar(c, ax=ax[i], label='Radial velocity [m/s]', location='bottom')
+        ax[i].set_xlim([-2, 2])
+        ax[i].set_ylim([-2, 2])
+        ax[i].set_ylabel('Y [km]')
+        ax[i].set_xlabel('X [km]')
+        ax[i].set_title(str(dataset['time'].values[0]) + f" {elevations}")
+    
+    return fig
+
+
 
 '''
 Import of StreamLine .hpl (txt) files and save locally in directory. Therefore
@@ -176,7 +257,7 @@ def read_as_netcdf(file, lat, lon, alt, n_sweeps=1):
     ds = ds.sortby('time')
     return ds
 
-def process_file(fi):
+def process_file(fi, ds_name='sdl_esss', site_name='atmos'):
     print("Processing %s" % fi)
     base, name = os.path.split(fi)
     scan_type = name.split(".")[-2]
@@ -184,11 +265,36 @@ def process_file(fi):
 
     # Calibration of radial velocity
     ds["radial_velocity"] = ds["radial_velocity"] + radial_vel_cal
-    date = name.split(".")[4]
-    time = name.split(".")[5]
+    date = name.split("_")[2]
+    time = name.split("_")[3]
     ds.attrs["scan_type"] = scan_type
-    out_name = 'dl.wfip3.caco.%s.%s.r0.nc' % (date, time)
-
+    out_name = f'dl.{ds_name}.{site_name}.%s.%s.r0.nc' % (date, time)
+    if scan_type.lower() == "stare":
+        out_name = f'dl.{ds_name}.{site_name}.%s.%s.stare.a0.nc' % (date, time)
+        out_png_name = f'dl.{ds_name}.{site_name}.%s.%s.stare.a0.png' % (date, time)
+        if "radial_wind_speed" in ds.data_vars:
+            vel_key = "radial_wind_speed"
+        else:
+            vel_key = "radial_velocity"
+        
+        fig = plot_time_series(ds, rng_key="range", vel_key=vel_key)
+    else:
+        if len(np.unique(np.round(ds['azimuth'], 0))) < 2:
+            out_name = f'dl.{ds_name}.{site_name}.%s.%s.rhi.a0.nc' % (date, time)
+            out_png_name = f'dl.{ds_name}.{site_name}.%s.%s.rhi.a0.png' % (date, time)
+            if "radial_wind_speed" in ds.data_vars:
+                vel_key = "radial_wind_speed"
+            else:
+                vel_key = "radial_velocity"
+            fig = plot_rhi(ds, rng_key="range", vel_key=vel_key)
+        else:
+            out_name = f'dl.{ds_name}.{site_name}.%s.%s.ppi.a0.nc' % (date, time)
+            out_png_name = f'dl.{ds_name}.{site_name}.%s.%s.ppi.a0.png' % (date, time)
+            if "radial_wind_speed" in ds.data_vars:
+                vel_key = "radial_wind_speed"
+            else:
+                vel_key = "radial_velocity"
+            fig = plot_ppi(ds, rng_key="range", vel_key=vel_key)
     dest_path = os.path.join(args.dest_path, date)
     if not os.path.exists(dest_path):
         os.makedirs(dest_path)
@@ -198,18 +304,8 @@ def process_file(fi):
     quick_dir_path = os.path.join(args.quicklooks_path, date)
     if not os.path.exists(quick_dir_path):
         os.makedirs(quick_dir_path)
-    quick_dir_path = os.path.join(quick_dir_path, '%s.%s.%s.png' % (scan_type, date, time))
-    fig, ax = plt.subplots(3, 1, figsize=(10, 7))
-    cbar_kwargs = {'label': '1 - log10(intensity)'}
-    (1 - np.log10(ds['intensity'])).T.plot(ax=ax[0], cmap='ChaseSpectral', vmin=0, vmax=1,
-        cbar_kwargs=cbar_kwargs)
-    ds['radial_velocity'].T.plot(ax=ax[1], cmap='balance', vmin=-5, vmax=5)
-    ds['spectral_width'].T.plot(ax=ax[2], cmap='Spectral_r', vmin=5, vmax=10)
-    ax[0].set_ylim([0, 3000])
-    ax[1].set_ylim([0, 3000])
-    ax[2].set_ylim([0, 3000])
-
-    fig.tight_layout()
+    quick_dir_path = os.path.join(quick_dir_path, out_png_name)
+    
     fig.savefig(quick_dir_path, bbox_inches='tight')
     plt.close(fig)
     del fig
@@ -226,12 +322,20 @@ if __name__ == "__main__":
     parser.add_argument('--date', default=None, help="Date in YYYYMMDD, default is today")
     parser.add_argument('--quicklooks_path', default=DEFAULT_QUICKLOOKS_PATH,
             help="Destination path for quicklooks")
+    parser.add_argument('--no_parallel', action="store_true",
+                        help="Disable parallel processing")
+    parser.add_argument('-n', '--n_workers', type=int, default=16,
+                        help="Number of workers to use for processing (Default: 16)")
     args = parser.parse_args()
     date = args.date
     if date is None:
-        input_list = glob(args.source_path + "/**/*.hpl", recursive=True)
+        input_list = glob(args.source_path + "/*.hpl", recursive=True)
     else:
-        input_list = glob(args.source_path + "/**/*" + date + "*.hpl", recursive=True)
-    with Client(LocalCluster(n_workers=16)) as c:
-        results = c.map(process_file, input_list)
-        wait(results)
+        input_list = glob(args.source_path + "/*" + date + "*.hpl", recursive=True)
+    print(input_list)
+    if args.no_parallel is False:
+        with Client(LocalCluster(n_workers=args.n_workers, threads_per_worker=1)) as c:
+            results = c.map(process_file, input_list)
+            wait(results)
+    else:
+        results = list(map(process_file, input_list))
