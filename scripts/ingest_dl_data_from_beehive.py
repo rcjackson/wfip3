@@ -137,7 +137,7 @@ def main(node, start_date, end_date):
             end=end_day,
             filter={
                 "name" : 'upload',
-                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.7.23",
+                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.5.08.1",
                 "vsn" : node,
             }
         )
@@ -148,7 +148,7 @@ def main(node, start_date, end_date):
             end=end_day,
             filter={
                 "name" : 'lidar.strategy',
-                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.7.23",
+                "plugin": "registry.sagecontinuum.org/rjackson/lidar-control:2025.5.08.1",
                 "vsn" : node,
             }
         )

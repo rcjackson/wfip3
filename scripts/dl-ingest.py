@@ -50,16 +50,20 @@ def plot_rhi(dataset, vel_key="radial_wind_speed", rng_key="distance", **kwargs)
     az_deg = dataset['azimuth'].values
     azi = np.deg2rad(dataset['azimuth'])
     el = np.deg2rad(dataset['elevation'])
-    
+    dataset["streamwise_velocity"] = dataset[vel_key] * np.cos(el)
+    mask = dataset['intensity'] > 1.008
+    mask = np.logical_and(mask, np.logical_or(el < np.deg2rad(20), el > np.deg2rad(160)))
     rng = dataset[rng_key]
     el, rng = np.meshgrid(el, rng, indexing='ij')
     x = rng * np.cos(el)
     y = rng * np.sin(el)
-    c = ax.pcolormesh(x/1e3, y, dataset[vel_key].where(
-        dataset['intensity'] > 1.008), **kwargs)
-    ax.contourf(x/1e3, y, dataset['intensity'], levels=[1.3, np.inf])
+    
+    
+    c = ax.pcolormesh(x/1e3, y, dataset["streamwise_velocity"].where(
+        mask), **kwargs)
+    #ax.contourf(x/1e3, y, dataset['intensity'], levels=[1.3, np.inf])
     plt.colorbar(c, ax=ax, 
-                 label='Radial velocity [m/s]', location='bottom')
+                 label='Streamwise velocity [m/s]', location='bottom')
     ax.set_ylim([0, 500])
     ax.set_xlim([-2, 2])
     ax.set_ylabel('Z [m]', labelpad=40)
@@ -88,11 +92,13 @@ def plot_ppi(dataset, vel_key="radial_wind_speed", rng_key="distance", **kwargs)
     for i, elevations in enumerate([5, 10, 15]):
         mask = np.logical_and(dataset['intensity'] > 1.008,
                               dataset['elevation'] == elevations)
-        
+        #mask = np.logical_and(mask, np.logical_or(el < 30, el > 150))
+        dataset["along_wind_velocity"] = dataset[vel_key] * np.cos(azi)
+
         c = ax[i].pcolormesh(x/1e3, y/1e3, dataset[vel_key].where(
             mask), **kwargs)
         
-        plt.colorbar(c, ax=ax[i], label='Radial velocity [m/s]', location='bottom')
+        plt.colorbar(c, ax=ax[i], label='Streamwise velocity [m/s]', location='bottom')
         ax[i].set_xlim([-2, 2])
         ax[i].set_ylim([-2, 2])
         ax[i].set_ylabel('Y [km]')
@@ -286,7 +292,7 @@ def process_file(fi, ds_name='sdl_esss', site_name='atmos'):
                 vel_key = "radial_wind_speed"
             else:
                 vel_key = "radial_velocity"
-            fig = plot_rhi(ds, rng_key="range", vel_key=vel_key)
+            fig = plot_rhi(ds, rng_key="range", vel_key=vel_key, vmin=0, vmax=20, cmap="Spectral_r")
         else:
             out_name = f'dl.{ds_name}.{site_name}.%s.%s.ppi.a0.nc' % (date, time)
             out_png_name = f'dl.{ds_name}.{site_name}.%s.%s.ppi.a0.png' % (date, time)
@@ -294,7 +300,7 @@ def process_file(fi, ds_name='sdl_esss', site_name='atmos'):
                 vel_key = "radial_wind_speed"
             else:
                 vel_key = "radial_velocity"
-            fig = plot_ppi(ds, rng_key="range", vel_key=vel_key)
+            fig = plot_ppi(ds, rng_key="range", vel_key=vel_key, vmin=0, vmax=20, cmap="Spectral_r")
     dest_path = os.path.join(args.dest_path, date)
     if not os.path.exists(dest_path):
         os.makedirs(dest_path)
@@ -326,6 +332,10 @@ if __name__ == "__main__":
                         help="Disable parallel processing")
     parser.add_argument('-n', '--n_workers', type=int, default=16,
                         help="Number of workers to use for processing (Default: 16)")
+    parser.add_argument('--ds_name', default='sdl_esss',
+            help="Dataset name to use in output file names")
+    parser.add_argument('--site_name', default='atmos',
+            help="Site name to use in output file names")
     args = parser.parse_args()
     date = args.date
     if date is None:
@@ -335,7 +345,7 @@ if __name__ == "__main__":
     print(input_list)
     if args.no_parallel is False:
         with Client(LocalCluster(n_workers=args.n_workers, threads_per_worker=1)) as c:
-            results = c.map(process_file, input_list)
+            results = c.map(process_file, input_list, ds_name=args.ds_name, site_name=args.site_name)
             wait(results)
     else:
-        results = list(map(process_file, input_list))
+        results = list(map(lambda fi: process_file(fi, ds_name=args.ds_name, site_name=args.site_name), input_list))
