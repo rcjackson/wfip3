@@ -98,7 +98,7 @@ def plot_ppi(dataset, vel_key="radial_wind_speed", rng_key="distance", **kwargs)
         c = ax[i].pcolormesh(x/1e3, y/1e3, dataset[vel_key].where(
             mask), **kwargs)
         
-        plt.colorbar(c, ax=ax[i], label='Streamwise velocity [m/s]', location='bottom')
+        plt.colorbar(c, ax=ax[i], label='Radial velocity [m/s]', location='bottom')
         ax[i].set_xlim([-2, 2])
         ax[i].set_ylim([-2, 2])
         ax[i].set_ylabel('Y [km]')
