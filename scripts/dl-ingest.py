@@ -13,12 +13,12 @@ from glob import glob
 from datetime import datetime, timedelta
 from distributed import LocalCluster, Client, wait
 
-DEFAULT_SOURCE_PATH = '/Volumes/Untitled/wfip3_adaptive_scanning_data/nant.lidar.z02.a1/'
-DEFAULT_OUTPUT_PATH = '/Volumes/Untitled/wfip3_adaptive_scanning_data/nant.lidar.z02.a1/netcdf'
-DEFAULT_QUICKLOOKS_PATH = '/Volumes/Untitled/wfip3_adaptive_scanning_data/nant.lidar.z02.a1/quicklooks'
+DEFAULT_SOURCE_PATH = '/lcrc/group/earthscience/rjackson/sdl_esss/data/doppler_lidar/'
+DEFAULT_OUTPUT_PATH = '/lcrc/group/earthscience/rjackson/sdl_esss/data/doppler_lidar/netcdf'
+DEFAULT_QUICKLOOKS_PATH = '/lcrc/group/earthscience/rjackson/sdl_esss/data/doppler_lidar/quicklooks/'
 
-neiu_lat = 42 + 1/60 + 56.86/3600
-neiu_lon = -70 - 3/60 - 12.37/3600
+neiu_lat = 41 + 42/60 + 5.28/3600
+neiu_lon = -87 - 59/60 - 42.71/3600
 neiu_alt = 51.4
 radial_vel_cal = 0.0
 azimuth_cal = 0.0
@@ -339,7 +339,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     date = args.date
     if date is None:
-        input_list = glob(args.source_path + "/*.hpl", recursive=True)
+        input_list = glob(args.source_path + "/**/*.hpl", recursive=True)
     else:
         input_list = glob(args.source_path + "/*" + date + "*.hpl", recursive=True)
     print(input_list)
