@@ -50,22 +50,22 @@ def plot_rhi(dataset, vel_key="radial_wind_speed", rng_key="distance", **kwargs)
     az_deg = dataset['azimuth'].values
     azi = np.deg2rad(dataset['azimuth'])
     el = np.deg2rad(dataset['elevation'])
-    dataset["streamwise_velocity"] = dataset[vel_key] * np.cos(el)
+    #dataset["streamwise_velocity"] = dataset[vel_key] * np.cos(el)
     mask = dataset['intensity'] > 1.008
-    mask = np.logical_and(mask, np.logical_or(el < np.deg2rad(20), el > np.deg2rad(160)))
+    #mask = np.logical_and(mask, np.logical_or(el < np.deg2rad(20), el > np.deg2rad(160)))
     rng = dataset[rng_key]
     el, rng = np.meshgrid(el, rng, indexing='ij')
     x = rng * np.cos(el)
     y = rng * np.sin(el)
     
     
-    c = ax.pcolormesh(x/1e3, y, dataset["streamwise_velocity"].where(
+    c = ax.pcolormesh(x/1e3, y, dataset["radial_velocity"].where(
         mask), **kwargs)
     #ax.contourf(x/1e3, y, dataset['intensity'], levels=[1.3, np.inf])
-    plt.colorbar(c, ax=ax, 
-                 label='Streamwise velocity [m/s]', location='bottom')
-    ax.set_ylim([0, 500])
-    ax.set_xlim([-2, 2])
+    plt.colorbar(c, ax=ax,
+                 label='Radial Velocity [m/s]', location='bottom')
+    ax.set_ylim([0, 2000])
+    ax.set_xlim([-3, 3])
     ax.set_ylabel('Z [m]', labelpad=40)
     ax.set_xlabel('X [km]')
     ax.set_title(str(dataset['time'].values[0]) + f' {az_deg[0]:.1f} degrees')
@@ -292,7 +292,7 @@ def process_file(fi, ds_name='sdl_esss', site_name='atmos'):
                 vel_key = "radial_wind_speed"
             else:
                 vel_key = "radial_velocity"
-            fig = plot_rhi(ds, rng_key="range", vel_key=vel_key, vmin=0, vmax=20, cmap="Spectral_r")
+            fig = plot_rhi(ds, rng_key="range", vel_key=vel_key, vmin=-20, vmax=20, cmap="balance")
         else:
             out_name = f'dl.{ds_name}.{site_name}.%s.%s.ppi.a0.nc' % (date, time)
             out_png_name = f'dl.{ds_name}.{site_name}.%s.%s.ppi.a0.png' % (date, time)
@@ -300,7 +300,7 @@ def process_file(fi, ds_name='sdl_esss', site_name='atmos'):
                 vel_key = "radial_wind_speed"
             else:
                 vel_key = "radial_velocity"
-            fig = plot_ppi(ds, rng_key="range", vel_key=vel_key, vmin=0, vmax=20, cmap="Spectral_r")
+            fig = plot_ppi(ds, rng_key="range", vel_key=vel_key, vmin=-20, vmax=20, cmap="balance")
     dest_path = os.path.join(args.dest_path, date)
     if not os.path.exists(dest_path):
         os.makedirs(dest_path)
@@ -341,7 +341,7 @@ if __name__ == "__main__":
     if date is None:
         input_list = glob(args.source_path + "/**/*.hpl", recursive=True)
     else:
-        input_list = glob(args.source_path + "/*" + date + "*.hpl", recursive=True)
+        input_list = glob(args.source_path + "/**/*" + date + "*.hpl", recursive=True)
     print(input_list)
     if args.no_parallel is False:
         with Client(LocalCluster(n_workers=args.n_workers, threads_per_worker=1)) as c:

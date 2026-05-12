@@ -15,32 +15,6 @@ dates = ["20250729", "20250730"]
 out_file = 'rad_vel_hist.nc'
 
 
-def load_terrain(gridded_data_path, dates, xlim=(-5000, 5000), ylim=(-5000, 5000)):
-    """Load PyGMT earth relief and reproject to the radar x/y grid (meters)."""
-    sample_file = sorted(glob.glob(os.path.join(gridded_data_path, f'*{dates[0]}*.nc')))[0]
-    with xr.open_dataset(sample_file) as ds:
-        origin_lat = float(ds['lat'].values[0])
-        origin_lon = float(ds['lon'].values[0])
-
-    R = 6371000.0
-    lat_per_m = 180.0 / (np.pi * R)
-    lon_per_m = lat_per_m / np.cos(np.radians(origin_lat))
-
-    region = [
-        origin_lon + xlim[0] * lon_per_m,
-        origin_lon + xlim[1] * lon_per_m,
-        origin_lat + ylim[0] * lat_per_m,
-        origin_lat + ylim[1] * lat_per_m,
-    ]
-
-    topo = pygmt.datasets.load_earth_relief(resolution='01s', region=region)
-
-    topo_x = (topo.lon.values - origin_lon) / lon_per_m
-    topo_y = (topo.lat.values - origin_lat) / lat_per_m
-    topo_xx, topo_yy = np.meshgrid(topo_x, topo_y)
-
-    return topo_xx, topo_yy, topo.values
-
 
 if __name__ == "__main__":
     hours = [20, 21, 22, 23, 0, 1]
@@ -51,7 +25,7 @@ if __name__ == "__main__":
         ds = []
         for d in dates:
             print(d)
-            with xr.open_mfdataset(os.path.join(gridded_data_path, f'*{d}*.nc')) as in_ds:
+            with xr.open_mfdataset(os.path.join(gridded_data_path, f'*{d}*rhi*.nc')) as in_ds:
                 if d == "20250729":
                     ds.append(in_ds.sel(time=slice("2025-07-29T20:00:00", "2025-07-30T00:00:00")))
                 elif d == "20250730":
@@ -74,12 +48,11 @@ if __name__ == "__main__":
             rad_vel = ds_groupby_hour["radial_velocity"].sel(hour=hours)
 
 
-    topo_xx, topo_yy, topo_vals = load_terrain(gridded_data_path, dates)
     print(rad_vel)
 
     fig, ax = plt.subplots(2, len(hours) // 2, figsize=(2*len(hours), 6))
     rad_vel["x"] = rad_vel["x"]/1e3
-    rad_vel["y"] = rad_vel["y"]/1e3
+    rad_vel["z"] = rad_vel["z"]/1e3
     for i, hr in enumerate(hours):
         print(i)
         print(total_points.sel(hour=hr).max())
@@ -88,20 +61,11 @@ if __name__ == "__main__":
                 cmap='balance', ax=ax[i % 2, i // 2],
                 add_colorbar=False, zorder=0, alpha=1)
 
-        cs = ax[i % 2, i // 2].contour(
-            topo_xx/1e3, topo_yy/1e3, topo_vals,
-            levels=np.arange(200, 1000, 100), colors='g', 
-            linewidths=1, alpha=1,
-        zorder=1)
-        ax[i % 2, i // 2].clabel(cs, inline=True, fontsize=6, fmt='%d m')
-        ax[i % 2, i // 2].scatter(0, 0, marker='*', label="WREF", color='k', s=81, zorder=2)
-        ax[i % 2, i // 2].set_xlim([-5, 5])
-        ax[i % 2, i // 2].set_ylim([-5, 5])
+        ax[i % 2, i // 2].set_xlim([0, 3])
+        ax[i % 2, i // 2].set_ylim([0, 1.5])
         ax[i % 2, i // 2].set_xlabel("X [km]")
-        ax[i % 2, i // 2].set_ylabel("Y [km]")
+        ax[i % 2, i // 2].set_ylabel("Z [km]")
         ax[i % 2, i // 2].set_title(f"{hours_local[i]} LDT")
-        if i == 0:
-            ax[i % 2, i // 2].legend(loc="lower right")
         if i // 2 > 0:
             ax[i % 2, i // 2].set_ylabel("")
         if i % 2 == 0:
@@ -110,5 +74,5 @@ if __name__ == "__main__":
     cax = fig.add_axes([0.92, 0.15, 0.01, 0.7])
     fig.colorbar(im, cax=cax, label="$v_{r}$ [$m\ s^{-1}$]", shrink=0.6)
     #fig.tight_layout()
-    fig.savefig('wref_paper_fig_mean_radial_vel.png', dpi=150)
+    fig.savefig('wref_paper_fig_mean_radial_vel_rhi.png', dpi=150)
     rad_vel.close()

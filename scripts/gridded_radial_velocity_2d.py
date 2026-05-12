@@ -11,7 +11,7 @@ from pyart.core.transforms import antenna_to_cartesian
 lidar_data_path = '/lcrc/group/earthscience/rjackson/leaff/nc/'
 gridded_data_path = '/lcrc/group/earthscience/rjackson/leaff/gridded/'
 
-def return_gridded_radial_velocity(file_name, dx=30, dy=30., dz=30., snr_threshold=0.008,
+def return_gridded_radial_velocity(file_name, dx=30, dy=30., elevation=5., snr_threshold=0.008,
                                     vel_key='radial_velocity', rng_key='range',
                                       min_x=-2000, max_x=2000, min_y=-2000, max_y=2000,
                                       min_z=0, max_z=1000, verbose=False,
@@ -75,31 +75,28 @@ def return_gridded_radial_velocity(file_name, dx=30, dy=30., dz=30., snr_thresho
             # Create a regular grid
             x_grid = np.arange(min_x, max_x, dx)
             y_grid = np.arange(min_y, max_y, dy)
-            z_grid = np.arange(min_z, max_z, dz)
-            z_grid, y_grid, x_grid = np.meshgrid(z_grid, y_grid, x_grid, indexing='ij')
+            y_grid, x_grid = np.meshgrid(y_grid, x_grid, indexing='ij')
             if verbose:
-                print("Minimum and maximum of x, y, z:", np.nanmin(x), np.nanmax(x), np.nanmin(y), np.nanmax(y), np.nanmin(z), np.nanmax(z))
+                print("Minimum and maximum of x, y:", np.nanmin(x), np.nanmax(x), np.nanmin(y), np.nanmax(y))
             
             # Interpolate the streamwise velocity onto the regular grid
             from scipy.interpolate import griddata
             # Remove data points outside of minimum and maximum x
             x_mask = np.logical_and(x >= min_x, x <= max_x)
             y_mask = np.logical_and(y >= min_y, y <= max_y)
-            z_mask = np.logical_and(z >= min_z, z <= max_z)
             mask = np.logical_and(x_mask, y_mask)
-            mask = np.logical_and(mask, z_mask)
+            mask = np.logical_and(mask, np.isclose(el, elevation))
             x = x[mask]
             y = y[mask]
-            z = z[mask]
             if verbose:
                 print("Number of valid points after applying spatial mask:", len(x))
-            points = np.column_stack((z.flatten(), y.flatten(), x.flatten()))
+            points = np.column_stack((y.flatten(), x.flatten()))
             values = dataset["radial_wind_speed"].values.flatten()
             values = values[mask.flatten()]
             points = points[~np.isnan(values)]
             values = values[~np.isnan(values)]
             try:
-                radial_velocity_grid = griddata(points, values, (z_grid, y_grid, x_grid), method='linear')
+                radial_velocity_grid = griddata(points, values, (y_grid, x_grid), method='linear')
             except Exception as e:
                 if verbose:
                     print("Error interpolating radial velocity data.")
@@ -111,7 +108,8 @@ def return_gridded_radial_velocity(file_name, dx=30, dy=30., dz=30., snr_thresho
             if verbose:
                 print("Radial velocity grid shape:", radial_velocity_grid.shape)
             radial_velocity = xr.DataArray(radial_velocity_grid,
-                                            coords=[z_grid[:, 0, 0], y_grid[0, :, 0], x_grid[0, 0, :]], dims=['z', 'y', 'x'])
+                                            coords=[y_grid[:, 0], x_grid[0, :]], 
+                                                dims=['y', 'x'])
             radial_velocity.attrs['units'] = 'm/s'
             radial_velocity.attrs['long_name'] = 'Radial Velocity'
             out_dataset = xr.Dataset({'radial_velocity': radial_velocity.astype(np.float32),
@@ -144,8 +142,6 @@ if __name__ == "__main__":
                         help='X grid spacing in meters. Default is 10 m.')
     parser.add_argument('--dy', type=float, default=10,
                         help='Y grid spacing in meters. Default is 10 m.')
-    parser.add_argument('--dz', type=float, default=10,
-                        help='Vertical grid spacing in meters. Default is 10 m.')
     parser.add_argument('--snr_threshold', type=float, default=0.008,
                         help='Signal-to-noise ratio threshold for masking low-quality data. Default is 0.008.')
     parser.add_argument('--elevation', type=float, default=5.,
@@ -180,14 +176,14 @@ if __name__ == "__main__":
     if args.num_workers > 1:
         with LocalCluster(n_workers=args.num_workers, threads_per_worker=1) as cluster:
             with Client(cluster) as client:
-                futures = [client.submit(return_gridded_radial_velocity, file_name, args.dx, args.dy, args.dz,
+                futures = [client.submit(return_gridded_radial_velocity, file_name, args.dx, args.dy, args.elevation,
                                          args.snr_threshold, 
                                          args.vel_key, args.rng_key,
                                          args.min_x, args.max_x, args.min_y, args.max_y,
                                          args.min_z, args.max_z, args.verbose) for file_name in file_list]
                 results = client.gather(futures)
     else:
-        results = [return_gridded_radial_velocity(file_name, args.dx, args.dy, args.dz,
+        results = [return_gridded_radial_velocity(file_name, args.dx, args.dy, args.elevation,
                                                    args.snr_threshold, 
                                                    args.vel_key, args.rng_key,
                                                    args.min_x, args.max_x, args.min_y, args.max_y,
