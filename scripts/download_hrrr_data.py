@@ -6,9 +6,10 @@ Pulls two HRRR products per hourly timestep via Herbie (byte-range subset,
 not full-file downloads):
   - sfc: cloud base/ceiling/top height, terrain height, low cloud cover,
     surface precip rate, surface pressure
-  - prs: geopotential height, rain water mixing ratio, temperature, specific
-    humidity, u/v wind, and vertical velocity (VVEL, Pa/s) on the 1000-850 mb
-    standard pressure levels
+  - prs: temperature, specific humidity, u/v wind, and vertical velocity
+    (VVEL, Pa/s) on the full standard pressure-level profile (1000-50 mb);
+    geopotential height and rain water mixing ratio on the 1000-850 mb
+    standard pressure levels only
 
 Output is resumable: each calendar month is written to its own netCDF file,
 and months whose output file already exists are skipped on a re-run.
@@ -35,14 +36,22 @@ SITES = {
     "BARG": (40.900, -70.783),
 }
 
-PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 875, 850]  # mb, surface to 850 mb
+# mb, surface to 850 mb -- used for geopotential height and rain water mixing ratio
+LOWER_LEVELS = [1000, 975, 950, 925, 900, 875, 850]
+# mb, full standard-level profile -- used for t, q, u, v, w
+FULL_LEVELS = [
+    1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 725, 700, 675, 650,
+    625, 600, 575, 550, 525, 500, 475, 450, 425, 400, 375, 350, 325, 300, 275,
+    250, 225, 200, 175, 150, 125, 100, 75, 50,
+]
 
 SFC_SEARCH = (
     ":(HGT:(cloud base|cloud ceiling|cloud top|surface)"
     "|LCDC:low cloud layer|PRATE:surface|PRES:surface):"
 )
-PRS_SEARCH = ":(HGT|TMP|SPFH|UGRD|VGRD|RWMR|VVEL):(%s) mb:" % "|".join(
-    str(level) for level in PRESSURE_LEVELS
+PRS_SEARCH = ":(HGT|RWMR):(%s) mb:|:(TMP|SPFH|UGRD|VGRD|VVEL):(%s) mb:" % (
+    "|".join(str(level) for level in LOWER_LEVELS),
+    "|".join(str(level) for level in FULL_LEVELS),
 )
 
 # (cfgrib shortName, GRIB_typeOfLevel) -> (output name, long name, units)
@@ -56,18 +65,26 @@ SFC_VAR_MAP = {
     ("sp", "surface"): ("surface_pressure", "surface pressure", "Pa"),
 }
 
-# cfgrib shortName -> (output name, long name, units)
+# cfgrib shortName -> (output name, long name, units, level dim, level coord)
 PRS_VAR_MAP = {
-    "gh": ("geopotential_height", "geopotential height", "m"),
-    "rwmr": ("rain_water_mixing_ratio", "rain water mixing ratio", "kg kg-1"),
-    "t": ("temperature", "temperature", "K"),
-    "q": ("specific_humidity", "specific humidity", "kg kg-1"),
-    "u": ("u_wind", "u-component of wind", "m s-1"),
-    "v": ("v_wind", "v-component of wind", "m s-1"),
+    "gh": ("geopotential_height", "geopotential height", "m", "level_lower", LOWER_LEVELS),
+    "rwmr": (
+        "rain_water_mixing_ratio",
+        "rain water mixing ratio",
+        "kg kg-1",
+        "level_lower",
+        LOWER_LEVELS,
+    ),
+    "t": ("temperature", "temperature", "K", "level", FULL_LEVELS),
+    "q": ("specific_humidity", "specific humidity", "kg kg-1", "level", FULL_LEVELS),
+    "u": ("u_wind", "u-component of wind", "m s-1", "level", FULL_LEVELS),
+    "v": ("v_wind", "v-component of wind", "m s-1", "level", FULL_LEVELS),
     "w": (
         "vertical_velocity",
         "vertical velocity (pressure velocity, omega)",
         "Pa s-1",
+        "level",
+        FULL_LEVELS,
     ),
 }
 
@@ -97,15 +114,16 @@ def extract_sfc_point(ds_or_list, j, i):
     return values
 
 
-def extract_prs_point(ds, j, i):
+def extract_prs_point(ds_or_list, j, i):
     """Extract the PRS_VAR_MAP profile variables at grid cell (j, i) as a flat dict of arrays."""
     values = {}
-    point = ds.isel(y=j, x=i)
-    for name, da in point.data_vars.items():
-        if name not in PRS_VAR_MAP:
-            continue
-        out_name = PRS_VAR_MAP[name][0]
-        values[out_name] = da.sortby("isobaricInhPa", ascending=False).values
+    for ds in _as_dataset_list(ds_or_list):
+        point = ds.isel(y=j, x=i)
+        for name, da in point.data_vars.items():
+            if name not in PRS_VAR_MAP:
+                continue
+            out_name = PRS_VAR_MAP[name][0]
+            values[out_name] = da.sortby("isobaricInhPa", ascending=False).values
     return values
 
 
@@ -142,17 +160,18 @@ def download_timestep(timestamp, grid_indices):
     try:
         H_prs = Herbie(timestamp, model="hrrr", product="prs", fxx=0)
         ds_prs = H_prs.xarray(PRS_SEARCH, remove_grib=True)
+        prs_list = _as_dataset_list(ds_prs)
         if "prs" not in grid_indices:
             with _grid_index_lock:
                 if "prs" not in grid_indices:
-                    lat2d, lon2d = ds_prs.latitude.values, ds_prs.longitude.values
+                    lat2d, lon2d = prs_list[0].latitude.values, prs_list[0].longitude.values
                     grid_indices["prs"] = {
                         site: find_nearest_index(lat2d, lon2d, lat, lon)
                         for site, (lat, lon) in SITES.items()
                     }
         for site in SITES:
             j, i = grid_indices["prs"][site]
-            site_records[site].update(extract_prs_point(ds_prs, j, i))
+            site_records[site].update(extract_prs_point(prs_list, j, i))
     except Exception as exc:
         logger.warning("prs download failed for %s: %s", timestamp, exc)
 
@@ -163,28 +182,26 @@ def download_timestep(timestamp, grid_indices):
 
 def build_site_dataset(site, times, records, grid_indices):
     """Assemble one xr.Dataset for a site from a list of per-timestep dicts."""
-    all_vars = set(SFC_VAR_MAP[k][0] for k in SFC_VAR_MAP) | set(
-        v[0] for v in PRS_VAR_MAP.values()
-    )
+    profile_dims = {v[0]: (v[3], v[4]) for v in PRS_VAR_MAP.values()}
+
     data_vars = {}
-    for out_name in all_vars:
-        is_profile = out_name in [v[0] for v in PRS_VAR_MAP.values()]
-        if is_profile:
-            arr = np.full((len(times), len(PRESSURE_LEVELS)), np.nan)
-            for t_idx, record in enumerate(records):
-                if out_name in record:
-                    arr[t_idx, :] = record[out_name]
-            data_vars[out_name] = (("time", "level"), arr)
-        else:
-            arr = np.full(len(times), np.nan)
-            for t_idx, record in enumerate(records):
-                if out_name in record:
-                    arr[t_idx] = record[out_name]
-            data_vars[out_name] = (("time",), arr)
+    for out_name in [v[0] for v in SFC_VAR_MAP.values()]:
+        arr = np.full(len(times), np.nan)
+        for t_idx, record in enumerate(records):
+            if out_name in record:
+                arr[t_idx] = record[out_name]
+        data_vars[out_name] = (("time",), arr)
+
+    for out_name, (level_dim, level_values) in profile_dims.items():
+        arr = np.full((len(times), len(level_values)), np.nan)
+        for t_idx, record in enumerate(records):
+            if out_name in record:
+                arr[t_idx, :] = record[out_name]
+        data_vars[out_name] = (("time", level_dim), arr)
 
     ds = xr.Dataset(
         data_vars=data_vars,
-        coords={"time": times, "level": PRESSURE_LEVELS},
+        coords={"time": times, "level": FULL_LEVELS, "level_lower": LOWER_LEVELS},
     )
 
     long_name_units = {v[0]: (v[1], v[2]) for v in SFC_VAR_MAP.values()}
@@ -193,7 +210,8 @@ def build_site_dataset(site, times, records, grid_indices):
         ds[name].attrs["long_name"] = long_name
         ds[name].attrs["units"] = units
 
-    ds["level"].attrs = {"long_name": "pressure level", "units": "mb"}
+    ds["level"].attrs = {"long_name": "pressure level (full profile)", "units": "mb"}
+    ds["level_lower"].attrs = {"long_name": "pressure level (1000-850 mb)", "units": "mb"}
 
     nominal_lat, nominal_lon = SITES[site]
     ds.attrs["site"] = site

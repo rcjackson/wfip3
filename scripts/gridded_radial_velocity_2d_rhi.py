@@ -8,8 +8,8 @@ from scipy.interpolate import griddata
 from distributed import Client, LocalCluster, wait
 from pyart.core.transforms import antenna_to_cartesian
 
-lidar_data_path = '/lcrc/group/earthscience/rjackson/leaff/nc/'
-gridded_data_path = '/lcrc/group/earthscience/rjackson/leaff/gridded/'
+lidar_data_path = '/Users/rjackson/sdl_esss/dl_data'
+gridded_data_path = '/Users/rjackson/sdl_esss/dl_grids'
 
 def return_gridded_radial_velocity(file_name, dx=30, dz=30., elevation=5., snr_threshold=0.008,
                                     vel_key='radial_velocity', rng_key='range',
@@ -67,16 +67,21 @@ def return_gridded_radial_velocity(file_name, dx=30, dz=30., elevation=5., snr_t
                 print(f"Elevations {el}")
             az = np.tile(az[:, np.newaxis], (1, ngates))
             el = np.tile(el[:, np.newaxis], (1, ngates))
-            x, y, z = antenna_to_cartesian(rng/1e3, az, el)
-            x = rng
-            dataset["radial_wind_speed"] = dataset["radial_wind_speed"].where(mask)
+            #x, y, z = antenna_to_cartesian(rng/1e3, az, el)
+            #x = rng
+            x = rng * np.cos(np.deg2rad(el))
+            z = rng * np.sin(np.deg2rad(el))
+            dataset[vel_key] = dataset[vel_key].where(mask)
             if verbose:
-                print("Data shapes - x:", x.shape, "y:", y.shape, "z:", z.shape, "radial_wind_speed:", dataset["radial_wind_speed"].shape)
-                print("Number of valid points after masking:", np.sum(~np.isnan(dataset["radial_wind_speed"].values)))
+                print("Data shapes - x:", x.shape, "z:", z.shape, "radial_wind_speed:", dataset[vel_key].shape)
+                print("Number of valid points after masking:", np.sum(~np.isnan(dataset[vel_key].values)))
             
             # Create a regular grid
             x_grid = np.arange(min_x, max_x, dx)
             z_grid = np.arange(min_z, max_z, dz)
+            if az.mean() > 180:
+                print("Flipping x grid for backward-looking scan.")
+                x = -x  # Flip x grid for backward-looking scans
             z_grid, x_grid = np.meshgrid(z_grid, x_grid, indexing='ij')
             if verbose:
                 print("Minimum and maximum of x, z:", np.nanmin(x), np.nanmax(x), np.nanmin(z), np.nanmax(z))
@@ -84,19 +89,17 @@ def return_gridded_radial_velocity(file_name, dx=30, dz=30., elevation=5., snr_t
             # Interpolate the streamwise velocity onto the regular grid
             from scipy.interpolate import griddata
             # Remove data points outside of minimum and maximum x
-            x_mask = np.logical_and(x >= min_x, x <= max_x)
-            z_mask = np.logical_and(z >= min_z, z <= max_z)
-            mask = np.logical_and(x_mask, z_mask)
-            mask = np.logical_and(mask, az > 270.)
-            x = x[mask]
-            z = z[mask]
+            
+            spatial_mask = (x >= min_x) & (x <= max_x) & (z >= min_z) & (z <= max_z)
+            x = x[spatial_mask]
+            z = z[spatial_mask]
+            mask = mask.values 
             if verbose:
                 print("Number of valid points after applying spatial mask:", len(x))
             points = np.column_stack((z.flatten(), x.flatten()))
-            values = dataset["radial_wind_speed"].values.flatten()
-            values = values[mask.flatten()]
-            points = points[~np.isnan(values)]
-            values = values[~np.isnan(values)]
+            values = dataset[vel_key].values.flatten()
+            values = np.where(mask.flatten(), values, np.nan)
+            values = values[spatial_mask.flatten()]            
             try:
                 radial_velocity_grid = griddata(points, values, (z_grid, x_grid), method='linear')
             except Exception as e:
@@ -117,9 +120,9 @@ def return_gridded_radial_velocity(file_name, dx=30, dz=30., elevation=5., snr_t
             out_dataset = xr.Dataset({'radial_velocity': radial_velocity.astype(np.float32),
                                     'azimuth': ('time', [az.mean()]),
                                     'time': ('time', [dataset['time'].values[0]]),
-                                    'alt': dataset["alt"],
-                                    'lat': dataset["lat"],
-                                    'lon': dataset["lon"]})
+                                    'alt': dataset["altitude"],
+                                    'lat': dataset["latitude"],
+                                    'lon': dataset["longitude"]})
             out_dataset['azimuth'].attrs['units'] = 'degrees'
             out_dataset['azimuth'].attrs['long_name'] = 'Mean Azimuth Angle'
     except ValueError as e:
@@ -156,9 +159,9 @@ if __name__ == "__main__":
                         help='Number of workers for parallel processing. Default is 4.')
     parser.add_argument('--verbose', action='store_true',
                         help='Print verbose output during processing.')
-    parser.add_argument('--min_x', type=float, default=-500,
+    parser.add_argument('--min_x', type=float, default=-3000,
                         help='Minimum x value for the output grid. Default is -500 m.')
-    parser.add_argument('--max_x', type=float, default=500,
+    parser.add_argument('--max_x', type=float, default=3000,
                         help='Maximum x value for the output grid. Default is 500 m.')
     parser.add_argument('--min_y', type=float, default=-500,
                         help='Minimum y value for the output grid. Default is -500 m.')
@@ -166,15 +169,15 @@ if __name__ == "__main__":
                         help='Maximum y value for the output grid. Default is 500 m.')
     parser.add_argument('--min_z', type=float, default=0,
                         help='Minimum z value for the output grid. Default is 0 m.')
-    parser.add_argument('--max_z', type=float, default=250,
+    parser.add_argument('--max_z', type=float, default=1000,
                         help='Maximum z value for the output grid. Default is 250 m.')
     args = parser.parse_args()
 
     # Load the dataset
     if args.date is None:
-        file_list = glob.glob(f"{args.input_dir}/**/*user1.nc", recursive=True)
+        file_list = sorted(glob.glob(f"{args.input_dir}/**/*rhi*.nc", recursive=True))
     else:
-        file_list = glob.glob(f"{args.input_dir}/**/*{args.date}*user1.nc", recursive=True)
+        file_list = sorted(glob.glob(f"{args.input_dir}/**/*{args.date}*rhi*.nc", recursive=True))
     if args.num_workers > 1:
         with LocalCluster(n_workers=args.num_workers, threads_per_worker=1) as cluster:
             with Client(cluster) as client:
